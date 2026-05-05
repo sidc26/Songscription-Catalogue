@@ -1,83 +1,153 @@
-# Songscription Fullstack Take-Home
+# Songscription
 
-Thanks for taking the time to do this. This project gives you a feel for the kind of work you'd be doing at Songscription, and gives us a sense of how you think about UI, UX, and backend integration.
+A personal MIDI transcription catalogue. Upload MIDI files, annotate them with rich metadata, organise into nested crates, and play them back in the browser — with an AI music teacher built in.
 
-## Product context
+---
 
-We're building a piano learning app where users can transcribe any music into a MIDI file, then learn it using an interactive piano roll. One page of that app is the **catalogue page** where users see every transcription they've created and click into one to practice it.
-
-**You're building that catalogue page.**
-
-You don't need to build any transcription logic. Treat uploading a `.mid` file as a stand-in for "the user just transcribed a song". The upload is the action that adds an entry to their library.
-
-## The task
-
-Build a single-page web app where a user can:
-
-1. **Upload a MIDI file** to add it to their catalogue. (Stand-in for "transcribe a song.")
-2. **Browse the catalogue** of every file they've added.
-3. **Click into a file** to see some details about it. Think about what details would be relevant for a learner of the song.
-
-## Things to think about
-
-These are examples of the kinds of product questions we think about. You don't have to answer or address them all in your build, they're just here as examples of different paths you could explore.
-
-- How do we make the **upload process** as smooth as possible? What happens during upload, after, and on failure?
-- Once a file is in the catalogue, **how does it appear to the user?** How do you make it easy to differentiate between songs? What if they don't know exactly what they want to practice that day?
-- As the catalogue grows, **how does someone find the song they want to come back to?** Search? Filter? Sort? Tags? Recently played? Favorites? Folders? Something else?
-- **What settings might a user want?** Per-file? Library-wide? What lives where?
-- What does the catalogue feel like with **0 items**? With **3**? With **300**?
-
-If you need data we haven't given you (favorites, last-practiced timestamps, accuracy metrics, practice logs, tags, difficulty, user info, etc.), invent it. Mock data is fine and encouraged.
-
-## What we're looking for
-
-- **It must persist.** Refreshing the page should keep the files. Use any backend you like to store the file and any extra metadata about it. We use Supabase, but you can choose whatever backend you're comfortable with.
-- **Visual polish.** This is a product surface. Empty states, hover states, loading, transitions, typography, spacing etc should be reasonable.
-- **How you store and query data.** We want to see how you store the data, which metadata you decide to add to the database, etc. 
-- **Product thinking.** Is the final output intuitive and usable? Can you take inspiration from other similar applications?
-- **Creative problem solving.** We've given you the bare minimum to get started. If you think the catalogue needs audio playback, previews, thumbnails, waveforms, anything, feel free to add it. There's no "right" set of features...surprise us.
-
-## What we're NOT looking for
-
-- **Auth.** Don't build login, that's a time sink. Treat it as a single user. If you want richer UI (avatars, settings, "your" stats, etc.), feel free to mock a user's data. We just want to see the product surface.
-- **A custom piano roll or practice experience.** If you want to design around it (e.g., a "Practice" button on each catalogue entry), feel free to leave a placeholder region (something like a panel that says *"this is where the piano roll would go"* is totally fine).
-
-## Time
-
-**Spend 2-3 hours.** We'd like to see what you can do in this time window. We recommend time boxing it and sending us what you've got by the 3-hour mark.
-
-Tools like Cursor, Copilot, ChatGPT, Claude, etc. are all fair game.
-
-## Getting started
+## Setup
 
 ```bash
+# 1. Install dependencies
 npm install
+
+# 2. Configure environment
+cp .env.example .env.local
+# Open .env.local and add your Groq API key (https://console.groq.com)
+
+# 3. Start the dev server
 npm run dev
+# Open http://localhost:3000
 ```
 
-The app runs at [http://localhost:3000](http://localhost:3000). Sample `.mid` files are in the `public/samples/` folder. You're also free to use your own.
+The SQLite database is created automatically at `.data/songs.db` on first run. No migrations or extra setup needed.
 
-## Stack
+---
 
-The starter is **Next.js 15 (App Router) + TypeScript + Tailwind**.
+## Design
 
-You're free to:
+Architecture decisions, component structure, and the rationale behind key product choices are documented in [DESIGN.md](DESIGN.md). Database schema and API reference are in [SCHEMA.md](SCHEMA.md).
 
-- Restructure the project layout however you want.
-- Swap the styling system, add a component library (shadcn, MUI, Mantine, etc.).
-- Add any libraries you'd add at work.
+---
 
-## Submission
+## Features
 
-When you're done, email **[katie@songscription.ai](mailto:katie@songscription.ai)** and **[alex@songscription.ai](mailto:alex@songscription.ai)** with:
+### Upload & Validation
+- Drag-and-drop or click-to-upload MIDI files (`.mid`, `.midi`)
+- Security validation: magic bytes check (`MThd`) rejects non-MIDI files before writing to disk; full structural parse catches corrupted files after
+- 10 MB size limit; files under 14 bytes rejected immediately
 
-1. A link to your **GitHub repo** (public, or invite `ayeitskatie1212` if private).
-2. Screenshots of the finished UI.
-3. A short note (3–5 sentences) covering:
-  - What backend you chose and why.
-  - One thing you'd do differently with more time.
-  - One thing you're proud of.
+### 5-Step Upload Wizard
+1. **Upload** — drop your MIDI file
+2. **Trim** — drag start/end handles to select the section to transcribe (mouse + touch supported)
+3. **Tag** — title, artist, instrument, genre, mood, key signature, time signature, difficulty, crate, tags
+4. **Transcription Type** — direct transcription or arrangement
+5. **Copyright** — rights acknowledgement before saving
 
+### Rich Metadata
+All fields are editable after upload in the song detail panel:
+- Title, artist, target instrument
+- Genre (Classical, Jazz, Pop, Rock, Electronic, R&B, Folk, Hip-Hop, Other)
+- Mood (Energetic, Melancholic, Peaceful, Intense, Playful, Romantic, Mysterious, Triumphant)
+- Key signature (all 24 major/minor keys)
+- Time signature (4/4, 3/4, 6/8, 2/4, 5/4, 7/8, 12/8)
+- Difficulty (Beginner, Intermediate, Advanced, Expert)
+- Tags (comma-separated, fuzzy-searchable)
+- Crate assignment (supports full nested path e.g. `Jazz/Bebop`)
+- MIDI-derived: duration, tempo, track count, note count, format, ticks/quarter note, instrument names
 
-That's it. Looking forward to seeing what you build!
+### AI Music Teacher
+- Powered by Groq (`llama-3.3-70b-versatile`)
+- Generates: 3 interesting facts about the piece, 3 specific practice tips, and 3 related pieces worth studying alongside it
+- Cached in the database after first generation; free to regenerate
+
+### Browser MIDI Playback
+- Built on the Web Audio API — no third-party bundling issues
+- Triangle-wave oscillators with velocity-scaled gain envelopes
+- Controls: play/pause, scrubber, speed (0.25× – 2×), loop
+- Trim region respected during playback in the wizard
+
+### Nested Crates
+- Up to 5 levels deep (e.g. `Jazz/Bebop/Modal`) — validated server-side
+- Persisted in SQLite — empty crates survive page refresh
+- Ancestors auto-created (creating `Jazz/Bebop` also creates `Jazz`)
+- Inline creation at any level (hover a crate → click `+`)
+- Deleting a crate moves all songs (including any sub-crate contents) to Collection
+- Drag songs from the grid or sidebar into any sidebar crate
+
+### Search, Filter & Sort
+- Fuzzy search (Fuse.js) across title, artist, genre, mood, key, tags
+- Filter by genre, mood, difficulty (multi-select, scrollable)
+- Sort by: recently accessed, date added, title A–Z, artist A–Z, duration, tempo
+- Grid and list view (preference persisted in localStorage)
+
+### Song Detail Panel
+- Edit all metadata inline; changes saved on blur/select
+- Incomplete fields banner (amber, per-song dismissible)
+- Share: free, unlimited (viral growth driver)
+- PDF export: gated (Pro) — a clean PDF download can permanently replace the platform for some users, so it's the right paywall point
+- MIDI download: intentionally removed — users uploaded it themselves
+- Practice CTA with piano roll placeholder (interactive practice mode coming in a future release)
+- Delete with confirmation dialog
+
+### Favorites
+- Heart any song from the card, list view, or detail panel
+- Dedicated Favorites screen filters the library to hearted songs only
+
+### Songscripter Profile
+- Streak tracking (current + longest), total duration, notes transcribed, time saved, average tempo, top genre and mood
+- Mood and difficulty distribution charts
+- AI-generated "transcriber identity" card (Groq, cached in `localStorage`)
+- Shareable profile link — encodes stats as a Base64 URL param, no server storage needed
+
+### Sidebar
+- Collapsible to icon-only mode
+- Recent songs (last 3 accessed)
+- Full nested crate tree with song counts
+- Songs in the sidebar are draggable onto crates
+
+---
+
+## Supported Flows
+
+1. **Upload a new transcription** — drag a `.mid` onto the landing card or click "New Transcription"
+2. **Trim and tag** — use the wizard to select a region and annotate with metadata
+3. **Browse library** — click "Transcriptions" in the sidebar; switch between grid and list view
+4. **Search** — click "Search" or type in the toolbar search box; fuzzy matches across all fields
+5. **Filter and sort** — use the Filter and Sort dropdowns in the toolbar
+6. **Open a song** — click any card or sidebar song item to open the detail panel
+7. **Edit metadata** — edit fields inline; changes persist automatically
+8. **Get AI analysis** — click "Generate" in the AI Summary section of the detail panel
+9. **Share** — click the share icon in the detail panel (free, unlimited)
+10. **Create a crate** — click `+` next to "Crates" in the sidebar, or hover any crate and click its `+` to nest inside it
+11. **Organise** — drag cards from the grid or songs from the sidebar onto sidebar crates
+12. **Filter by crate** — click a crate in the sidebar; breadcrumb shows the full path with clickable ancestors
+13. **Delete a crate** — hover crate → trash icon → confirm; all songs move to Collection
+14. **Delete a song** — click trash icon on card (confirm on second click) or use the delete button in the detail panel
+15. **View favorites** — click the Heart icon in the sidebar to filter the library to hearted songs
+16. **View your profile** — click "My Profile" in the sidebar; share it via the Share button to copy a link
+
+---
+
+## Tech Stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Next.js 15 (App Router) |
+| Language | TypeScript |
+| Styling | Tailwind CSS + shadcn/ui (Radix UI) |
+| Database | SQLite via `node:sqlite` (`DatabaseSync`) |
+| MIDI parsing | `@tonejs/midi` (server-side only) |
+| MIDI playback | Web Audio API (client-side, no bundler issues) |
+| Search | Fuse.js (client-side fuzzy matching) |
+| AI | Groq (`llama-3.3-70b-versatile`) |
+| Upload validation | Magic bytes (`MThd`) + structural parse |
+
+---
+
+## Submission Notes
+
+**Backend choice:** I used Node.js's built-in `node:sqlite` module with `DatabaseSync` rather than Prisma, Drizzle, or an external service. The take-home runs in a fresh environment — a native addon or a hosted database would add setup friction. `node:sqlite` is built into Node 22+, needs zero configuration, and is synchronous, which suits a single-user local app perfectly: no async ceremony for straightforward reads and writes, and no connection pool to manage.
+
+**One thing I'd do differently with more time:** The "time saved" estimate currently uses a flat 5× multiplier on total duration (a reasonable baseline — manual transcription typically takes 4–6× playback time). I'd replace it with a per-piece model that weights by difficulty, note density (`note_count / duration_sec`), and genre. That makes the number genuinely meaningful rather than a rough approximation, and it turns the stat into something a user would actually feel reflects their effort.
+
+**One thing I'm proud of:** The crate system. Storing hierarchy as slash-separated paths in a single `TEXT` column (`Jazz/Bebop`) looks like a simplification, but it makes the two most common operations — filtering songs by crate and displaying the tree — each a single database query. The tree is reconstructed client-side from the flat path set, ancestor creation is a single `INSERT OR IGNORE` loop, and subtree deletion is one `LIKE 'Jazz/%'` statement. The schema stays minimal without sacrificing any of the nesting flexibility a real library needs.

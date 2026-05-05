@@ -2,20 +2,51 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #0a0a0a;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: #F0EFEA;
+    --sidebar-bg: #F0EFEA;
+    --card: #FFFFFF;
+    --card-hover: #F7F6F2;
+    --accent: #2A9B8A;
+    --accent-hover: #228A7A;
+    --accent-muted: #E8F4F2;
+    --accent-yellow: #F5D547;
+    --text: #1A1A1A;
+    --muted: #6B7280;
+    --border: #E2E1DC;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    height: 100%;
+  }
+
+  #__next,
+  main {
+    height: 100%;
   }
 }
 
-html,
-body {
-  background: var(--background);
-  color: var(--foreground);
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 2px;
+  }
 }
