@@ -14,6 +14,8 @@ import { AISummary } from "./AISummary";
 import { formatDuration, formatDate, cardColor } from "@/lib/utils";
 import type { Song, AISummary as AISummaryType } from "@/types";
 
+// MidiPlayer uses the Web Audio API which is browser-only; ssr: false prevents
+// Next.js from attempting to render it during SSR where AudioContext is undefined.
 const MidiPlayer = dynamic(() => import("./MidiPlayer").then((m) => ({ default: m.MidiPlayer })), { ssr: false });
 
 const KEY_SIGS = ["C Major","G Major","D Major","A Major","E Major","B Major","F Major","Bb Major","Eb Major","Ab Major","Db Major","Gb Major","A Minor","E Minor","B Minor","F# Minor","C# Minor","G# Minor","D Minor","G Minor","C Minor","F Minor","Bb Minor","Eb Minor"];
@@ -62,6 +64,9 @@ export function SongDetail({ song, songs, crates, open, onClose, onUpdate, onDel
   const [copied, setCopied] = useState(false);
   const [dismissedBannerId, setDismissedBannerId] = useState<number | null>(null);
 
+  // Optimistic PATCH: apply fields immediately for responsiveness, then reconcile
+  // with the server response (which may differ, e.g. after server-side coercions).
+  // On failure the original song is restored so the UI stays truthful.
   const patch = useCallback(async (fields: Partial<Song>) => {
     if (!song) return;
     const optimistic = { ...song, ...fields };
@@ -79,6 +84,9 @@ export function SongDetail({ song, songs, crates, open, onClose, onUpdate, onDel
     }
   }, [song, onUpdate]);
 
+  // Called when the dialog opens (via Dialog's onOpenChange). Incrementing play_count
+  // here (not on actual audio play) is intentional — opening the detail view counts
+  // as "practiced" for the purposes of streak and engagement tracking.
   const handleOpen = useCallback(async () => {
     if (!song) return;
     const now = new Date().toISOString();
@@ -122,7 +130,8 @@ export function SongDetail({ song, songs, crates, open, onClose, onUpdate, onDel
     setFolderQuery("");
   };
 
-  // All crates: persisted ones + any folder currently in use by a song
+  // Union of persisted crates and any folder that a song already references —
+  // handles the edge case where a crate was deleted but songs still point to it.
   const allCrates = Array.from(
     new Set(["Collection", ...crates, ...songs.map((s) => s.folder)])
   ).sort();
@@ -519,6 +528,8 @@ function SelectField({ label, options, value, onSave }: { label: string; options
   return (
     <div>
       <p className="text-xs font-medium text-muted mb-1">{label}</p>
+      {/* "__none" sentinel avoids the empty-string issue in Radix Select, which
+          treats an empty value as "uncontrolled". Saving "__none" clears the field. */}
       <Select value={value || "__none"} onValueChange={(v) => onSave(v === "__none" ? "" : v)}>
         <SelectTrigger className="h-8 text-sm">
           <SelectValue placeholder={`Select ${label.toLowerCase()}`} />

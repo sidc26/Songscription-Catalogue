@@ -30,6 +30,9 @@ export function MidiPlayer({ fileUrl, duration, trimStart = 0, trimEnd, compact 
     let mounted = true;
     let player: any;
 
+    // Dynamic import keeps TonePlayer (and its Web Audio API usage) out of the
+    // SSR bundle. This effect re-runs whenever fileUrl changes so switching songs
+    // in the detail panel tears down the old player and loads the new file.
     import("@/lib/tone-player").then(({ TonePlayer }) => {
       player = new TonePlayer();
       playerRef.current = player;
@@ -51,12 +54,16 @@ export function MidiPlayer({ fileUrl, duration, trimStart = 0, trimEnd, compact 
     });
 
     return () => {
+      // mounted flag prevents setState calls after unmount when the async load
+      // resolves after the component has already been removed from the tree.
       mounted = false;
       if (tickRef.current) cancelAnimationFrame(tickRef.current);
       player?.dispose();
     };
   }, [fileUrl, trimStart]);
 
+  // requestAnimationFrame drives the scrubber UI at ~60 fps. Using rAF instead of
+  // setInterval avoids accumulating stale frames when the tab is in the background.
   const tick = useCallback(() => {
     const p = playerRef.current;
     if (!p) return;
@@ -91,6 +98,8 @@ export function MidiPlayer({ fileUrl, duration, trimStart = 0, trimEnd, compact 
     }
   };
 
+  // pct is 0–1 relative to the trimmed region, not the full file duration.
+  // Seek within [trimStart, effectiveDuration] keeps trim boundaries respected.
   const handleSeek = (pct: number) => {
     const t = trimStart + pct * (effectiveDuration - trimStart);
     playerRef.current?.seek(t);

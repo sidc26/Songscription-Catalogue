@@ -14,6 +14,7 @@ function isMidiMagicValid(buf: Buffer): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  // savedPath is tracked so it can be cleaned up if any subsequent step fails.
   let savedPath: string | null = null;
 
   try {
@@ -22,13 +23,14 @@ export async function POST(request: NextRequest) {
 
     if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
 
-    // Extension check
+    // Extension check runs before reading the body to fail fast on obvious misuse.
     const name = file.name.toLowerCase();
     if (!name.endsWith(".mid") && !name.endsWith(".midi")) {
       return NextResponse.json({ error: "Only .mid and .midi files are supported" }, { status: 400 });
     }
 
-    // Size guard (10 MB — real MIDI files are almost never larger)
+    // 10 MB ceiling — even the largest orchestral MIDI files are well under 1 MB;
+    // anything larger is almost certainly a wrong file type or malicious upload.
     if (file.size > 10 * 1024 * 1024) {
       return NextResponse.json({ error: "File too large (max 10 MB)" }, { status: 400 });
     }
@@ -40,7 +42,8 @@ export async function POST(request: NextRequest) {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    // Magic-bytes validation — rejects renamed non-MIDI files and truncated uploads
+    // Magic-bytes check runs before writing to disk so we never persist garbage.
+    // A second, full structural parse runs after writing (see parseMidi call below).
     if (!isMidiMagicValid(buffer)) {
       return NextResponse.json(
         { error: "File does not appear to be a valid MIDI file (magic bytes mismatch)" },
@@ -51,16 +54,20 @@ export async function POST(request: NextRequest) {
     const uploadsDir = path.join(process.cwd(), "public", "uploads");
     fs.mkdirSync(uploadsDir, { recursive: true });
 
+    // UUID filename prevents collisions and strips any path-traversal characters
+    // that could appear in the original filename.
     const filename = `${randomUUID()}.mid`;
     savedPath = path.join(uploadsDir, filename);
     await writeFile(savedPath, buffer);
 
-    // Full structural parse — catches corrupted chunks, malformed headers, etc.
+    // Full structural parse happens after writing so parseMidi has the real file
+    // handle if it ever needs to stream. On failure the file is deleted immediately.
     let midi;
     try {
       midi = parseMidi(buffer);
     } catch (parseErr: unknown) {
-      // Delete the saved file so it doesn't linger
+      // Unlink the orphan — cleanupOrphans() would catch it on next restart, but
+      // removing it now keeps the uploads directory clean during the same session.
       if (savedPath) await unlink(savedPath).catch(() => {});
       const detail = parseErr instanceof Error ? parseErr.message : "corrupted or unsupported file";
       return NextResponse.json(

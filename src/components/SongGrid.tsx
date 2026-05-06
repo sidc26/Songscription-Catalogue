@@ -22,6 +22,9 @@ interface Props {
   searchRef?: React.RefObject<HTMLInputElement | null>;
 }
 
+// defaultDir sets the sort direction automatically when switching attributes,
+// reflecting natural expectations: newest first for dates, A→Z for text, etc.
+// The arrow button in the toolbar can then toggle it from that sensible starting point.
 const SORT_OPTIONS = [
   { label: "Recently Accessed", value: "recent", defaultDir: "desc" as const },
   { label: "Date Added", value: "created_at", defaultDir: "desc" as const },
@@ -47,11 +50,16 @@ export function SongGrid({ songs, loading, activeFolder, onFavorite, onSongClick
     setSort(val);
     setSortDir(SORT_OPTIONS.find((o) => o.value === val)?.defaultDir ?? "asc");
   };
+  // Read the user's last-used view from localStorage so it persists across sessions.
+  // The SSR guard prevents a hydration mismatch since localStorage is browser-only.
   const [view, setView] = useState<"grid" | "list">(() => {
     if (typeof window !== "undefined") return (localStorage.getItem("songview") as "grid" | "list") ?? "grid";
     return "grid";
   });
 
+  // Fuse.js runs entirely client-side over the full songs array — no server round-trip.
+  // threshold: 0.35 allows minor typos without drowning results in false positives.
+  // tags is joined to a string so Fuse can match individual tag words against the query.
   const fuse = useMemo(() => new Fuse(songs, {
     keys: ["title", "artist", "genre", "mood", "key_signature", { name: "tags", getFn: (s) => s.tags.join(" ") }],
     threshold: 0.35,
@@ -76,6 +84,8 @@ export function SongGrid({ songs, loading, activeFolder, onFavorite, onSongClick
   const activeFilterCount = Object.values(filters).flat().length;
 
   const filtered = useMemo(() => {
+    // When a search query is active, Fuse returns results sorted by relevance score
+    // so the manual sort below is intentionally skipped — score order is more useful.
     let result = query.trim()
       ? fuse.search(query).map((r) => r.item)
       : [...songs];

@@ -5,11 +5,14 @@ export async function GET() {
   return NextResponse.json(getCrates());
 }
 
+// 5-level cap keeps the sidebar tree navigable and prevents degenerate paths that
+// would make the LIKE prefix match in deleteCrateAndDescendants unreasonably broad.
 const MAX_CRATE_DEPTH = 5;
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const path = typeof body?.path === "string" ? body.path.trim() : "";
+  // 'Collection' is the reserved default bucket and cannot be shadowed as a crate.
   if (!path || path === "Collection") {
     return NextResponse.json({ error: "Invalid crate path" }, { status: 400 });
   }

@@ -24,6 +24,9 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     const db = getDb();
     const body = await request.json();
 
+    // Allowlist prevents arbitrary column injection — only user-editable fields
+    // are accepted. MIDI metadata fields (note_count, duration_sec, etc.) are
+    // intentionally excluded; they're immutable after upload.
     const allowed = [
       "title", "artist", "key_signature", "time_signature", "tags", "is_favorite",
       "genre", "mood", "difficulty", "folder", "play_count", "last_played",
@@ -37,10 +40,13 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       if (key in body) {
         updates.push(`${key} = ?`);
         if (key === "tags") {
+          // PATCH always receives tags as a JS array; serialise to TEXT for storage.
           values.push(Array.isArray(body[key]) ? JSON.stringify(body[key]) : body[key]);
         } else if (key === "ai_summary") {
+          // Allow explicit null to clear a cached summary (e.g. after song metadata edit).
           values.push(body[key] !== null ? JSON.stringify(body[key]) : null);
         } else if (key === "is_favorite") {
+          // Coerce boolean to 0/1 because SQLite has no native BOOLEAN column type.
           values.push(body[key] ? 1 : 0);
         } else {
           values.push(body[key]);
@@ -71,6 +77,9 @@ export async function DELETE(_req: NextRequest, { params }: Ctx) {
 
     db.prepare("DELETE FROM songs WHERE id = ?").run(id);
 
+    // Delete the MIDI file after the DB row is gone; losing the file without the
+    // row would be an orphan (caught by cleanupOrphans), but losing the row without
+    // the file would break the player for anyone who has the URL cached.
     const filepath = path.join(process.cwd(), "public", "uploads", row.filename);
     try { fs.unlinkSync(filepath); } catch { /* ignore */ }
 

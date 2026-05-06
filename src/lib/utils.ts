@@ -24,6 +24,9 @@ export function getTimeGreeting(): string {
   return "Good evening!";
 }
 
+// Colors are hand-picked to match the emotional character of each mood label,
+// NOT derived from the song title or a hash. This ensures the accent strip on a
+// "Peaceful" card always reads as calm green regardless of which song it is.
 const MOOD_COLORS: Record<string, string> = {
   Energetic:   "#F97316", // orange
   Melancholic: "#818CF8", // indigo

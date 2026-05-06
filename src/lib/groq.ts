@@ -7,6 +7,9 @@ function getClient(): Groq {
   return new Groq({ apiKey });
 }
 
+// Generates a structured AI summary for a single song and returns it as a typed
+// object. The result is stored in songs.ai_summary so this function is only called
+// once per song — on subsequent panel opens the cached DB value is returned instead.
 export async function generateAISummary(song: Song): Promise<AISummary> {
   const prompt = `You are an expert music teacher and music historian with deep knowledge of music theory, transcription, and pedagogy. A student has transcribed the following piece:
 
@@ -35,6 +38,7 @@ facts: 3 essential or interesting facts about this piece, its history, or its mu
 tips: 3 specific, actionable practice recommendations — e.g. playing the main theme through all 12 keys, studying a particular chord progression, common mistakes players make, or a specific quality to focus on when performing.
 related: 3 related songs or pieces genuinely worth transcribing or studying alongside this one (like Billie's Bounce → Blues for Alice), each with a concise reason why they complement each other musically.`;
 
+  // temperature: 0.7 gives creative variety without making facts unreliable.
   const completion = await getClient().chat.completions.create({
     model: "llama-3.3-70b-versatile",
     messages: [{ role: "user", content: prompt }],
@@ -43,6 +47,8 @@ related: 3 related songs or pieces genuinely worth transcribing or studying alon
   });
 
   const text = completion.choices[0]?.message?.content ?? "";
+  // The prompt explicitly forbids markdown code fences; if the model disobeys,
+  // JSON.parse will throw and the caller handles the error.
   const parsed = JSON.parse(text) as AISummary;
 
   if (!parsed.facts || !parsed.tips || !parsed.related) {

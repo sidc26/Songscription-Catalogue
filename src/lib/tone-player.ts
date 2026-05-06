@@ -1,6 +1,8 @@
-// Client-side only. Uses Web Audio API directly to avoid Tone.js bundling
-// issues in Next.js (the tone package's class exports are unreliable across
-// webpack's ESM→CJS transpilation boundary).
+// Client-side only. Tone.js was removed because its class-based exports failed to
+// survive webpack's ESM→CJS boundary in Next.js — importing Tone caused runtime
+// "not a constructor" errors. This implementation reproduces the essential transport
+// using raw Web Audio API: one OscillatorNode + GainNode pair per note, all
+// scheduled via AudioContext.currentTime for sample-accurate timing.
 import { Midi } from "@tonejs/midi";
 
 interface ScheduledNote {
@@ -10,7 +12,8 @@ interface ScheduledNote {
   velocity: number;
 }
 
-// Midi note number → Hz (equal temperament, A4 = 440 Hz)
+// Standard equal-temperament formula: A4 = 440 Hz is MIDI note 69.
+// Each semitone is a factor of 2^(1/12).
 function midiToFreq(midi: number): number {
   return 440 * Math.pow(2, (midi - 69) / 12);
 }
@@ -35,7 +38,9 @@ export class TonePlayer {
   private _loop: boolean = false;
   private _loaded: boolean = false;
 
-  // Playback state tracked via AudioContext time
+  // Playback position is reconstructed from two reference points rather than a
+  // running counter. This avoids drift: wall-clock elapsed * speed + songOffset
+  // is always correct, even after seek() or speed changes.
   private _playing: boolean = false;
   private _playStartCtxTime: number = 0; // ctx.currentTime when play() was called
   private _playStartSongTime: number = 0; // song seconds at that moment
@@ -71,7 +76,9 @@ export class TonePlayer {
     return this.ctx;
   }
 
-  // Schedule all notes that start at or after `songOffset` seconds
+  // All future notes are scheduled upfront into the AudioContext timeline.
+  // This is the Web Audio "clock ahead" pattern: notes fire at exact ctx timestamps
+  // so there's no JavaScript timer jitter during playback.
   private _scheduleNotes(songOffset: number): void {
     this._clearNodes();
     const ctx = this._ctx();
@@ -80,6 +87,7 @@ export class TonePlayer {
 
     for (const note of this.notes) {
       const noteRelTime = note.time / s - songOffset / s;
+      // -0.05 s tolerance so notes right at the seek point aren't silently skipped.
       if (noteRelTime < -0.05) continue; // already past
 
       const startAt = Math.max(now, now + noteRelTime);
@@ -88,9 +96,14 @@ export class TonePlayer {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
+      // Triangle wave is softer and more musical than sawtooth/square for MIDI
+      // playback; it avoids the harsh aliasing of a pure sine while still being
+      // lightweight enough to schedule hundreds of notes simultaneously.
       osc.type = "triangle";
       osc.frequency.value = note.freq;
 
+      // Velocity (0–1) is scaled to 0.25 max to prevent clipping when many notes
+      // play simultaneously. The 5 ms attack and 50 ms release ramp avoid clicks.
       const vol = note.velocity * 0.25;
       gain.gain.setValueAtTime(0, startAt);
       gain.gain.linearRampToValueAtTime(vol, startAt + 0.005);
@@ -118,6 +131,9 @@ export class TonePlayer {
     }
   }
 
+  // setTimeout drives end-of-song detection rather than polling getCurrentTime()
+  // from React. The timer fires once, cleans up, and either re-schedules (loop)
+  // or marks playback as stopped. It is cancelled immediately on pause/seek/stop.
   private _scheduleEndOrLoop(songOffset: number): void {
     const remaining = (this._duration - songOffset) / this._speed;
     if (remaining <= 0) return;
@@ -138,6 +154,8 @@ export class TonePlayer {
 
   async play(): Promise<void> {
     const ctx = this._ctx();
+    // Browsers suspend AudioContext until a user gesture. resume() is a no-op if
+    // already running, so it's safe to call unconditionally here.
     if (ctx.state === "suspended") await ctx.resume();
 
     const songOffset = this._playStartSongTime; // preserved from last pause/seek
@@ -195,6 +213,8 @@ export class TonePlayer {
     }
   }
 
+  // Changing speed requires cancelling all pre-scheduled nodes (which were timed for
+  // the old speed) and re-scheduling everything from the current song position.
   setSpeed(newSpeed: number): void {
     const wasPlaying = this._playing;
     const songNow = this.getCurrentTime();

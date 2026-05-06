@@ -15,6 +15,9 @@ interface Props {
 
 export function SongCard({ song, view, onFavorite, onClick, onDragStart, onDelete }: Props) {
   const color = cardColor(song.mood);
+  // Two-click delete: first click enters `confirming`, second click calls onDelete.
+  // The auto-reset timer prevents the confirming state from persisting indefinitely
+  // if the user clicks away without confirming.
   const [confirming, setConfirming] = useState(false);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -76,6 +79,9 @@ export function SongCard({ song, view, onFavorite, onClick, onDragStart, onDelet
             <button
               onClick={handleTrashClick}
               title={confirming ? "Click again to delete" : "Delete"}
+              // The two className branches must be mutually exclusive: merging
+              // "opacity-0" with "text-red-500" via cn() would cause a Tailwind
+              // conflict where opacity-0 wins unexpectedly. The ternary avoids this.
               className={`transition-all ${
                 confirming
                   ? "text-red-500"

@@ -35,11 +35,13 @@ function toDay(iso: string): string {
 function calcStreaks(songs: Song[]): { current: number; longest: number } {
   if (songs.length === 0) return { current: 0, longest: 0 };
 
+  // One entry per calendar day — multiple uploads on the same day count as one streak day.
   const daySet = new Set(songs.map((s) => toDay(s.created_at)));
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Current streak: starts from today if active, else yesterday
+  // Allow the streak to include yesterday so a user who hasn't transcribed yet today
+  // doesn't see their streak reset to 0 mid-morning.
   const todayStr = today.toISOString().slice(0, 10);
   const yesterStr = new Date(today.getTime() - 86400000).toISOString().slice(0, 10);
   let current = 0;
@@ -51,7 +53,9 @@ function calcStreaks(songs: Song[]): { current: number; longest: number } {
     }
   }
 
-  // Longest streak ever
+  // Longest streak ever: sort unique days ascending and count consecutive 1-day gaps.
+  // diff === 1 only when adjacent days are exactly 24 hours apart (works because
+  // toDay() always produces midnight-anchored ISO strings).
   const sorted = [...daySet].sort();
   let longest = 0;
   let run = 1;
@@ -61,11 +65,15 @@ function calcStreaks(songs: Song[]): { current: number; longest: number } {
     run = diff === 1 ? run + 1 : 1;
     longest = Math.max(longest, run);
   }
+  // Edge case: a single upload day should count as a streak of 1, not 0.
   if (sorted.length > 0) longest = Math.max(longest, 1);
 
   return { current, longest };
 }
 
+// All stats are derived entirely from the songs array already loaded in the client,
+// so no extra API call is needed. This keeps the profile panel snappy and avoids
+// server round-trips for a view that is read-only.
 export function computeStats(songs: Song[]): ProfileStats {
   if (songs.length === 0) {
     return {
@@ -85,6 +93,7 @@ export function computeStats(songs: Song[]): ProfileStats {
 
   const favoriteGenre = mostCommon(songs.map((s) => s.genre).filter(Boolean));
   const favoriteMood = mostCommon(songs.map((s) => s.mood).filter(Boolean));
+  // Exclude the default 'Collection' bucket so topFolder reflects intentional crate use.
   const topFolder = mostCommon(
     songs.map((s) => s.folder).filter((f) => f && f !== "Collection")
   );
@@ -129,6 +138,9 @@ export function computeStats(songs: Song[]): ProfileStats {
   };
 }
 
+// Constructs a compact natural-language prompt so the LLM can produce a creative
+// "Spotify Wrapped"-style blurb. Stats are injected verbatim; tagsDesc translates
+// a ratio into a prose phrase the model can work with naturally.
 export function buildProfilePrompt(stats: ProfileStats): string {
   const dur = `${Math.floor(stats.totalDurationSec / 60)}m`;
   const genres = stats.uniqueGenres.join(", ") || "none tagged";

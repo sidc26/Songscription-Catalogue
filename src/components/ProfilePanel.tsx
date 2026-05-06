@@ -59,6 +59,9 @@ function StatTile({ icon, label, value, sub }: { icon: React.ReactNode; label: s
   );
 }
 
+// Returns a color that escalates from cool gray → yellow → orange → red as the streak
+// grows, giving a visceral sense of momentum. Thresholds are tuned for weekly and
+// monthly milestones (7, 14, 30 days) which feel meaningful to practice-oriented users.
 function flameColor(days: number): string {
   if (days === 0) return "#94A3B8"; // gray — no streak
   if (days < 2)   return "#FEF08A"; // pale yellow — just started
@@ -104,6 +107,10 @@ interface ShareData {
   generated_at: string;
 }
 
+// Encodes the full stats snapshot as Base64 in the URL so the /share page is
+// completely self-contained — no server storage or DB lookup required.
+// encodeURIComponent + unescape handles non-ASCII characters (e.g. UTF-8 artist names)
+// before btoa, which only accepts Latin-1 byte values.
 function buildShareUrl(data: ShareData): string {
   const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
   return `${window.location.origin}/share?d=${encoded}`;
@@ -127,7 +134,9 @@ export function ProfilePanel({ songs, onClose }: Props) {
   const [copied, setCopied] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
 
-  // Load cached summary from localStorage on mount
+  // Profile summary is cached in localStorage (not the DB) because it describes
+  // the whole library rather than a single song — there's no natural DB row for it.
+  // The cache persists until the user clicks "Regenerate".
   useEffect(() => {
     try {
       const cached = localStorage.getItem("profile_summary");
@@ -161,7 +170,9 @@ export function ProfilePanel({ songs, onClose }: Props) {
     }
   }, [stats]);
 
-  // Auto-fetch if no cached summary and songs exist
+  // Auto-fetch on first render only. The empty dep array is intentional: we don't
+  // want to re-fetch every time the songs array mutates — the user controls refresh
+  // explicitly via the "Regenerate" button.
   useEffect(() => {
     if (!summary && stats.totalSongs > 0) fetchSummary();
   }, []); // only on mount

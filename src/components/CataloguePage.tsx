@@ -12,6 +12,9 @@ import type { Song, WizardData } from "@/types";
 
 type ActiveNav = "home" | "library" | "search" | "favorites" | "stats";
 
+// Animates the greeting one character at a time to make the empty-state feel alive.
+// The cursor blink is shown only while typing is in progress to avoid distraction
+// after the text completes.
 function TypedGreeting({ text }: { text: string }) {
   const [displayed, setDisplayed] = useState("");
 
@@ -62,6 +65,8 @@ export function CataloguePage({ initialSongs, initialCrates }: Props) {
     setDetailOpen(true);
   }, []);
 
+  // Optimistic update: the heart flips immediately for perceived responsiveness.
+  // On network failure the previous value is restored so UI and DB stay consistent.
   const handleFavorite = useCallback(async (id: number, val: boolean) => {
     setSongs((prev) => prev.map((s) => s.id === id ? { ...s, is_favorite: val } : s));
     try {
@@ -87,7 +92,8 @@ export function CataloguePage({ initialSongs, initialCrates }: Props) {
 
   const handleCreateCrate = useCallback(async (path: string) => {
     if (!path || path === "Collection") return;
-    // Optimistically add this path and all ancestors to local state
+    // Mirror the server-side ancestor insertion locally so the sidebar tree renders
+    // the full hierarchy immediately without waiting for the POST to complete.
     const parts = path.split("/").filter(Boolean);
     const newPaths: string[] = [];
     let built = "";
@@ -125,6 +131,8 @@ export function CataloguePage({ initialSongs, initialCrates }: Props) {
 
   const handleDeleteCrate = useCallback(async (crate: string) => {
     const inSubtree = (f: string) => f === crate || f.startsWith(`${crate}/`);
+    // Move affected songs to 'Collection' client-side before the server call so the
+    // UI never shows songs under a crate that no longer exists.
     setSongs((prev) => prev.map((s) => inSubtree(s.folder) ? { ...s, folder: "Collection" } : s));
     setCrates((prev) => prev.filter((c) => !inSubtree(c)));
     if (activeFolder && inSubtree(activeFolder)) setActiveFolder(null);
@@ -173,6 +181,8 @@ export function CataloguePage({ initialSongs, initialCrates }: Props) {
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       if (!res.ok) throw new Error("Upload failed");
       const json = await res.json();
+      // Skip wizard step 0 (file picker) since the file is already uploaded;
+      // open directly at step 1 (metadata form) with the parsed MIDI data pre-filled.
       setWizardInitialStep(1);
       setWizardInitialData({ filename: json.filename, original_name: json.original_name, midi: json.midi });
       setWizardOpen(true);
@@ -208,7 +218,8 @@ export function CataloguePage({ initialSongs, initialCrates }: Props) {
 
   const handleNavSearch = useCallback(() => {
     setActiveNav("search");
-    // Give SongGrid time to render if switching from another state
+    // SongGrid mounts on the next render cycle; 50 ms lets it paint before we
+    // attempt to focus the input, avoiding a no-op focus call on a null ref.
     setTimeout(() => searchRef.current?.focus(), 50);
   }, []);
 

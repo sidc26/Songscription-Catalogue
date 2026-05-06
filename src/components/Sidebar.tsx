@@ -30,12 +30,16 @@ interface TreeNode {
   directCount: number;
 }
 
+// Reconstructs a TreeNode hierarchy from the flat list of slash-separated crate paths.
+// Crates are stored as TEXT paths in the DB (e.g. "Jazz/Bebop"); this function is the
+// only place that converts them into a nested tree structure for rendering.
 function buildTree(songs: Song[], customCrates: string[]): TreeNode[] {
   const allPaths = new Set<string>();
 
   for (const s of songs) {
     if (s.folder && s.folder !== "Collection") {
-      // Ensure every ancestor path also exists as a node
+      // Expand "Jazz/Bebop" into ["Jazz", "Jazz/Bebop"] so every ancestor always has
+      // a node, even if the intermediate crate was never explicitly created.
       const parts = s.folder.split("/").filter(Boolean);
       let built = "";
       for (const p of parts) {
@@ -51,6 +55,8 @@ function buildTree(songs: Song[], customCrates: string[]): TreeNode[] {
   const nodeMap = new Map<string, TreeNode>();
   const roots: TreeNode[] = [];
 
+  // Sort guarantees parents are inserted before their children so parent lookups
+  // always succeed (e.g. "Jazz" is processed before "Jazz/Bebop").
   for (const path of Array.from(allPaths).sort()) {
     const parts = path.split("/");
     const name = parts[parts.length - 1];
@@ -60,7 +66,9 @@ function buildTree(songs: Song[], customCrates: string[]): TreeNode[] {
     if (parentPath) {
       const parent = nodeMap.get(parentPath);
       if (parent) parent.children.push(node);
-      else roots.push(node); // orphan (parent deleted) → promote to root
+      // Parent missing means it was deleted while songs still reference the child —
+      // promote to root rather than silently hiding the crate.
+      else roots.push(node);
     } else {
       roots.push(node);
     }
@@ -90,6 +98,8 @@ export function Sidebar({
 
   const crateTree = buildTree(songs, crates);
 
+  // Falls back to created_at when a song has never been played, mirroring the
+  // "recent" sort in the API so both lists feel consistent.
   const recents = [...songs].sort((a, b) => {
     const ta = a.last_played ?? a.created_at;
     const tb = b.last_played ?? b.created_at;
@@ -164,7 +174,9 @@ export function Sidebar({
 
     return (
       <div key={node.path}>
-        {/* div instead of button — contains interactive children (+ and trash), nested buttons are invalid HTML */}
+        {/* A <div role="button"> is used instead of <button> because this element
+            contains <button> children (add subcrate, delete). HTML forbids nesting
+            interactive elements inside <button>. */}
         <div
           role="button"
           tabIndex={0}

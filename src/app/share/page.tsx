@@ -40,6 +40,8 @@ function ShareContent() {
     const raw = params.get("d");
     if (!raw) { setError(true); return; }
     try {
+      // Reverse of the encoding in ProfilePanel.buildShareUrl:
+      // atob → escape → decodeURIComponent handles non-ASCII characters safely.
       const decoded = decodeURIComponent(escape(atob(raw)));
       setData(JSON.parse(decoded));
     } catch {
@@ -158,6 +160,8 @@ function ShareContent() {
   );
 }
 
+// ShareContent uses useSearchParams which requires Suspense in Next.js 14+.
+// Without this boundary the build fails with a "missing Suspense" error.
 export default function SharePage() {
   return (
     <Suspense fallback={

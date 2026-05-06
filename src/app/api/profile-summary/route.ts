@@ -13,12 +13,16 @@ export async function POST(request: NextRequest) {
   try {
     const { stats }: { stats: ProfileStats } = await request.json();
 
+    // Stats are computed client-side and POSTed here rather than re-fetched from the
+    // DB, avoiding a second songs query just to build the prompt.
     if (!stats || typeof stats.totalSongs !== "number") {
       return NextResponse.json({ error: "Invalid stats payload" }, { status: 400 });
     }
 
     const prompt = buildProfilePrompt(stats);
 
+    // Higher temperature (0.9) than per-song summaries (0.7): personality blurbs
+    // benefit from more creative variation since they're shown once per session.
     const completion = await getClient().chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [{ role: "user", content: prompt }],
@@ -28,6 +32,8 @@ export async function POST(request: NextRequest) {
 
     const summary = completion.choices[0]?.message?.content?.trim() ?? "";
 
+    // generated_at is returned so the client can display a "last generated" date
+    // alongside the cached summary in localStorage without querying the server again.
     return NextResponse.json({ summary, generated_at: new Date().toISOString() });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";

@@ -1,8 +1,13 @@
+// node:sqlite DatabaseSync ships with Node 22+ and requires no native compilation,
+// making it safe to use in serverless/edge-adjacent deployments without build tooling.
 import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import fs from "fs";
 import type { Song, AISummary } from "@/types";
 
+// Stored on globalThis so Next.js hot-reloads don't open a second connection.
+// Without this guard, each HMR cycle would create a new DatabaseSync instance
+// while the old one (and its WAL lock) is still alive.
 declare global {
   var __db: DatabaseSync | undefined;
 }
@@ -15,11 +20,17 @@ function initDb(): DatabaseSync {
   fs.mkdirSync(uploadsDir, { recursive: true });
 
   const db = new DatabaseSync(path.join(dataDir, "songs.db"));
+  // WAL mode allows concurrent reads alongside a write, which matters when the
+  // dev server and a route handler race. Critically, WAL also survives crashes
+  // better than the default DELETE journal.
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS crates (
+      -- Entire hierarchy stored as a single slash-separated TEXT path (e.g. "Jazz/Bebop").
+      -- Tree reconstruction happens client-side; the DB only stores leaf nodes and
+      -- intermediate paths that were explicitly created.
       path TEXT PRIMARY KEY
     );
   `);
@@ -34,6 +45,9 @@ function initDb(): DatabaseSync {
       instrument         TEXT    NOT NULL DEFAULT '',
       genre              TEXT    NOT NULL DEFAULT '',
       mood               TEXT    NOT NULL DEFAULT '',
+      -- folder references a crate path by convention, NOT by FK.
+      -- Intentional: deleting a crate must not cascade-delete its songs;
+      -- they fall back to 'Collection' instead (handled in handleDeleteCrate).
       folder             TEXT    NOT NULL DEFAULT 'Collection',
       difficulty         TEXT    NOT NULL DEFAULT '',
       duration_sec       REAL    NOT NULL DEFAULT 0,
@@ -42,15 +56,22 @@ function initDb(): DatabaseSync {
       note_count         INTEGER NOT NULL DEFAULT 0,
       format             INTEGER NOT NULL DEFAULT 1,
       ticks_per_qn       INTEGER NOT NULL DEFAULT 480,
+      -- instrument_names and tags are JSON arrays serialised into TEXT columns.
+      -- SQLite JSON functions aren't used here; parsing happens in rowToSong.
       instrument_names   TEXT    NOT NULL DEFAULT '[]',
       key_signature      TEXT    NOT NULL DEFAULT '',
       time_signature     TEXT    NOT NULL DEFAULT '',
       transcription_type TEXT    NOT NULL DEFAULT 'direct',
       tags               TEXT    NOT NULL DEFAULT '[]',
+      -- SQLite has no BOOLEAN type; 0/1 INTEGER is the idiomatic substitute.
+      -- Coercion to boolean happens in rowToSong, so callers never see raw integers.
       is_favorite        INTEGER NOT NULL DEFAULT 0,
       play_count         INTEGER NOT NULL DEFAULT 0,
       last_played        TEXT,
       share_count        INTEGER NOT NULL DEFAULT 0,
+      -- ai_summary is cached here after first generation so subsequent opens skip
+      -- the Groq round-trip. NULL means not yet generated; once set it persists forever
+      -- (no TTL) to avoid re-billing users on every detail panel open.
       ai_summary         TEXT,
       created_at         TEXT    NOT NULL DEFAULT (datetime('now'))
     );
@@ -62,7 +83,8 @@ function initDb(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_songs_title       ON songs(title);
   `);
 
-  // Seed crates from existing song folders (runs once; OR IGNORE makes it idempotent)
+  // Back-fill crates for any songs that were imported before the crates table existed.
+  // OR IGNORE means re-running on startup is safe even if crates already exist.
   const existingFolders = db
     .prepare("SELECT DISTINCT folder FROM songs WHERE folder != 'Collection'")
     .all() as { folder: string }[];
@@ -85,6 +107,8 @@ export function getCrates(): string[] {
   return (getDb().prepare("SELECT path FROM crates ORDER BY path").all() as { path: string }[]).map((r) => r.path);
 }
 
+// Inserts the full path AND every ancestor so tree rendering never has orphan nodes.
+// e.g. "Jazz/Bebop/Hard" also inserts "Jazz" and "Jazz/Bebop" if missing.
 export function createCrateAndAncestors(path: string): void {
   const stmt = getDb().prepare("INSERT OR IGNORE INTO crates (path) VALUES (?)");
   const parts = path.split("/").filter(Boolean);
@@ -95,10 +119,15 @@ export function createCrateAndAncestors(path: string): void {
   }
 }
 
+// LIKE prefix match removes the crate and every child path in one query.
+// Songs in these crates are NOT deleted here; callers must patch them to 'Collection' first.
 export function deleteCrateAndDescendants(path: string): void {
   getDb().prepare("DELETE FROM crates WHERE path = ? OR path LIKE ?").run(path, `${path}/%`);
 }
 
+// Deletes MIDI files in /public/uploads that have no corresponding DB row.
+// Orphans accumulate when a server crash interrupts the upload→INSERT sequence,
+// or when files are manually removed from the DB. Runs once at startup.
 function cleanupOrphans(db: DatabaseSync, uploadsDir: string): void {
   try {
     const files = fs.readdirSync(uploadsDir);
@@ -119,6 +148,9 @@ export function getDb(): DatabaseSync {
   return global.__db;
 }
 
+// Converts a raw SQLite row (all values are primitives) into the typed Song shape.
+// This is the single place that handles TEXT→boolean and TEXT→array coercions
+// so callers never need to think about storage representation.
 export function rowToSong(row: Record<string, unknown>): Song {
   return {
     id: row.id as number,
@@ -142,6 +174,7 @@ export function rowToSong(row: Record<string, unknown>): Song {
     time_signature: row.time_signature as string,
     transcription_type: (row.transcription_type as string) as "direct" | "arrangement",
     tags: safeJsonParse<string[]>(row.tags as string, []),
+    // Strict equality to 1 (not just truthy) because SQLite returns 0 or 1.
     is_favorite: (row.is_favorite as number) === 1,
     play_count: row.play_count as number,
     last_played: row.last_played as string | null,
@@ -151,6 +184,8 @@ export function rowToSong(row: Record<string, unknown>): Song {
   };
 }
 
+// Returns the fallback rather than throwing when a column contains malformed JSON,
+// e.g. from a direct DB edit or a failed mid-write. Empty string also returns fallback.
 function safeJsonParse<T>(val: string | null | undefined, fallback: T): T {
   if (!val) return fallback;
   try { return JSON.parse(val) as T; } catch { return fallback; }

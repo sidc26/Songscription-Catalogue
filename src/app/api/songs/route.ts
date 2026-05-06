@@ -8,6 +8,10 @@ export async function GET(request: NextRequest) {
     const folder = searchParams.get("folder");
     const sort = searchParams.get("sort") ?? "recent";
 
+    // "recent" uses COALESCE so songs that have never been played sort by upload
+    // date instead of being pushed to the bottom. All sort directions are fixed here
+    // because the client-side SongGrid also applies its own sort — the DB sort only
+    // determines the initial order on page load.
     const sortClause = {
       recent: "COALESCE(last_played, created_at) DESC",
       created_at: "created_at DESC",
@@ -73,6 +77,9 @@ export async function POST(request: NextRequest) {
       key_signature: body.key_signature || "",
       time_signature: body.time_signature || "",
       transcription_type: body.transcription_type || "direct",
+      // POST receives tags as a raw comma-separated string from the wizard form.
+      // PATCH receives tags as a pre-split array. This asymmetry is intentional:
+      // the wizard sends unprocessed textarea input; PATCH sends structured data.
       tags: JSON.stringify(
         (body.tags || "").split(",").map((t: string) => t.trim()).filter(Boolean)
       ),
