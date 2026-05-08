@@ -144,7 +144,7 @@ All fields are editable after upload in the song detail panel:
 
 ---
 
-## Submission Notes
+## Notes
 
 **Backend choice:** I used Node.js's built-in `node:sqlite` module with `DatabaseSync` rather than Prisma, Drizzle, or an external service. The take-home runs in a fresh environment — a native addon or a hosted database would add setup friction. `node:sqlite` is built into Node 22+, needs zero configuration, and is synchronous, which suits a single-user local app perfectly: no async ceremony for straightforward reads and writes, and no connection pool to manage.
 
